@@ -1,0 +1,8 @@
+# Ping a server to determine if it is available.
+#
+---
+- name: Check connectivity
+  ping:
+    data: alive
+  tags: healthcheck
+

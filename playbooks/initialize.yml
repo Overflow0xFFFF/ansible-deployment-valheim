@@ -1,0 +1,28 @@
+# Bootstrap nodes in an environment.
+#
+# Use this playbook (perhaps with a custom inventory) to bootstrap an
+# environment wherever you need it. This playbook acts as a precursor to
+# applying deploy.yml. These are things you may want to run only once.
+#
+---
+- hosts: all
+  become: true
+
+  pre_tasks:
+    - import_tasks: tasks/ping.yml
+
+  roles:
+    - role: stonesoupkitchen.firewall
+    - role: stonesoupkitchen.ssh
+    - role: stonesoupkitchen.apparmor
+    #- role: stonesoupkitchen.auditd
+    - role: stonesoupkitchen.banner
+    #- role: stonesoupkitchen.chrony
+    - role: stonesoupkitchen.cron
+    #- role: stonesoupkitchen.fail2ban
+    - role: stonesoupkitchen.journald
+    - role: stonesoupkitchen.logrotate
+    - role: stonesoupkitchen.sudo
+
+  tasks:
+    - import_tasks: tasks/create_ansible_user.yml

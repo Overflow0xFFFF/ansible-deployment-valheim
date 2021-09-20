@@ -1,0 +1,166 @@
+# Deploy the service to the target infrastructure.
+#
+---
+- hosts: valheim
+  become: true
+
+  vars:
+    # Defaults
+    playbook_valheim_install_dir: "{{ valheim_install_dir | default('/opt/valheim') }}"
+    playbook_valheim_backup_schedule_hour: "{{ valheim_backup_schedule | default(8) }}"
+    playbook_valheim_backup_schedule_minute: "{{ valheim_backup_schedule | default(5) }}"
+    playbook_valheim_password: "{{ valheim_password | default('') }}"
+    playbook_valheim_port: "{{ valheim_port | default(2456) }}"
+    playbook_valheim_public: "{{ valheim_public | default(true) }}"
+    playbook_valheim_servername: "{{ valheim_servername | default('Valheim Server') }}"
+
+    # Vars
+    playbook_valheim_config_dir: "{{ playbook_valheim_install_dir }}/config"
+    playbook_valheim_bin_dir: "{{ playbook_valheim_install_dir }}/bin"
+    playbook_valheim_data_dir: "{{ playbook_valheim_install_dir }}/data"
+    playbook_valheim_steam_port: "{{ playbook_valheim_port|int + 1 }}"
+    playbook_valheim_user: "vhserver"
+    playbook_valheim_uid: "2793"
+    playbook_valheim_group: "vhserver"
+    playbook_valheim_gid: "2793"
+
+    playbook_tasks_dir: "{{ playbook_dir }}/../tasks"
+    playbook_templates_dir: "{{ playbook_dir }}/../templates"
+
+  pre_tasks:
+    - import_tasks: "{{ playbook_tasks_dir }}/ping.yml"
+
+    - name: Update apt cache
+      apt:
+        update_cache: true
+
+    - name: Install python-docker
+      package:
+        name: python-docker
+        state: present
+
+    - name: Install python3-docker
+      package:
+        name: python3-docker
+        state: present
+
+  roles:
+    - role: stonesoupkitchen.firewall
+    - role: stonesoupkitchen.cron
+    - role: geerlingguy.docker
+
+  tasks:
+    # Create Valheim service account
+    - name: Create Valheim group
+      group:
+        state: present
+        name: '{{ playbook_valheim_group }}'
+        gid: '{{ playbook_valheim_gid }}'
+
+    - name: Create Valheim user
+      user:
+        state: present
+        name: '{{ playbook_valheim_user }}'
+        uid: '{{ playbook_valheim_uid }}'
+        comment: Valheim server
+        group: '{{ playbook_valheim_group }}'
+        home: '{{ playbook_valheim_install_dir }}'
+        create_home: no
+        shell: /bin/bash
+        expires: -1
+
+    - name: Create Valheim install directory
+      file:
+        state: directory
+        path: '{{ playbook_valheim_install_dir }}'
+        owner: '{{ playbook_valheim_user }}'
+        group: '{{ playbook_valheim_group }}'
+        mode: '0750'
+
+    - name: Create Valheim data directory
+      file:
+        state: directory
+        path: "{{ playbook_valheim_data_dir }}"
+        owner: "{{ playbook_valheim_user }}"
+        group: "{{ playbook_valheim_group }}"
+        mode: '0750'
+
+    # Deploy helper scripts to bin directory.
+    - name: Create Valheim bin directory
+      file:
+        state: directory
+        path: "{{ playbook_valheim_bin_dir }}"
+        owner: "{{ playbook_valheim_user }}"
+        group: "{{ playbook_valheim_group }}"
+        mode: '0750'
+
+    - name: Create Valheim config directory
+      file:
+        state: directory
+        path: "{{ playbook_valheim_config_dir }}"
+        owner: "{{ playbook_valheim_user }}"
+        group: "{{ playbook_valheim_group }}"
+        mode: '0750'
+
+    - name: Copy backup.sh script
+      template:
+        src: "{{ playbook_templates_dir }}/bin/backup.sh.j2"
+        dest: "{{ playbook_valheim_bin_dir }}/backup.sh"
+        owner: "{{ playbook_valheim_user }}"
+        group: "{{ playbook_valheim_group }}"
+        mode: '0750'
+
+    - name: "Allow {{ playbook_valheim_user }} to run cron jobs"
+      lineinfile:
+        path: /etc/cron.allow
+        line: "{{ playbook_valheim_user }}"
+
+    - name: Configure backup cron job
+      cron:
+        name: "Valheim scheduled backup"
+        user: "{{ playbook_valheim_user }}"
+        minute: "{{ playbook_valheim_backup_schedule_minute }}"
+        hour: "{{ playbook_valheim_backup_schedule_hour }}"
+        job: "{{ playbook_valheim_bin_dir }}/backup.sh > /dev/null"
+
+    # Deploy the docker container
+    - name: Deploy Valheim docker container
+      docker_container:
+        name: valheim-server
+        state: started
+        detach: true
+        image: "ghcr.io/lloesche/valheim-server"
+        ports:
+          - "{{ playbook_valheim_port }}:2456/udp"
+          - "{{ playbook_valheim_steam_port }}:2457/udp"
+        volumes:
+          - "{{ playbook_valheim_data_dir }}:/opt/valheim"
+          - "{{ playbook_valheim_config_dir }}:/config"
+        env:
+          SERVER_NAME: "{{ playbook_valheim_servername }}"
+          SERVER_PORT: "2456"
+          WORLD_NAME: "Dedicated"
+          SERVER_PASS: "{{ playbook_valheim_password }}"
+          SERVER_PUBLIC: "{{ playbook_valheim_public | string }}"
+          PUID: "{{ playbook_valheim_uid }}"
+          PGID: "{{ playbook_valheim_gid }}"
+
+    # Configure firewall settings
+    - name: Open SSH port in firewall
+      ufw:
+        rule: allow
+        port: "22"
+        proto: tcp
+
+    - name: Open Valheim port in firewall
+      ufw:
+        rule: allow
+        port: "{{ playbook_valheim_port }}"
+        proto: udp
+
+    - name: Open Valheim (Steam) port in firewall
+      ufw:
+        rule: allow
+        port: "{{ playbook_valheim_steam_port }}"
+        proto: udp
+

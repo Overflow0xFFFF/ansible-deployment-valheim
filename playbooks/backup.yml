@@ -1,0 +1,13 @@
+# Make a backup of the configuration and data.
+#
+---
+- hosts: valheim
+  become: true
+
+  pre_tasks:
+    - import_tasks: tasks/ping.yml
+
+  tasks:
+    - debug:
+        msg: "TODO! Not yet implemented!"
+
